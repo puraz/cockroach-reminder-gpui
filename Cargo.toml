@@ -1,0 +1,40 @@
+[package]
+name = "cockroach-reminder-gpui"
+version = "1.0.0"
+description = "A break reminder app with cockroach animations - GPUI port"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "cockroach-reminder-gpui"
+path = "src/main.rs"
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+tray-icon = "0.19"
+notify-rust = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+rand = "0.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
+raw-window-handle = "0.6"
+smallvec = "1"
+smol = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", features = ["xinerama"] }
+
+[profile.release]
+opt-level = 3
+lto = true
