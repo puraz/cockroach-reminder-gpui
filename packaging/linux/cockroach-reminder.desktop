@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Cockroach Reminder
+Comment=Take regular breaks with an impossible-to-ignore reminder
+Exec=cockroach-reminder-gpui
+Icon=cockroach-reminder
+Terminal=false
+Categories=Utility;

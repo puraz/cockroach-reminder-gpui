@@ -1,28 +1,89 @@
-# Cockroach Reminder GPUI
+# Cockroach Reminder
 
-A GPUI + gpui-component desktop break reminder with animated, click-through
-cockroach overlays and a tray-based settings window.
+[简体中文](README.zh-CN.md) | English
 
-## Requirements
+[![CI](https://github.com/puraz/cockroach-reminder-gpui/actions/workflows/ci.yml/badge.svg)](https://github.com/puraz/cockroach-reminder-gpui/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/puraz/cockroach-reminder-gpui)](https://github.com/puraz/cockroach-reminder-gpui/releases/latest)
 
-- Rust nightly (pinned by `rust-toolchain.toml`)
-- macOS: Xcode Metal Toolchain
+Cockroach Reminder is a tray-based break timer for macOS, Windows, and Linux. When a break starts, animated cockroaches walk across every connected display in transparent, click-through windows. They are hard to ignore, but they do not block your work.
 
-Install the macOS shader compiler when Xcode reports that it is missing:
+The app is built with [GPUI](https://www.gpui.rs/) and [gpui-component](https://github.com/longbridge/gpui-component). Its interface is currently in Simplified Chinese.
+
+## Features
+
+- Configurable work interval and break duration
+- Multi-display animated overlays that let mouse input pass through
+- Controls for cockroach count, size, movement, and animation speed
+- System notifications at the start of a break
+- Tray controls to pause, resume, start a break immediately, or open settings
+- Settings saved between launches
+
+The default schedule is a 25-minute work interval followed by a 15-second break with 10 cockroaches.
+
+## Download
+
+Packages are available from the [latest GitHub release](https://github.com/puraz/cockroach-reminder-gpui/releases/latest).
+
+| Platform | Package |
+| --- | --- |
+| macOS Apple Silicon | `cockroach-reminder-v*-macos-aarch64.zip` |
+| macOS Intel | `cockroach-reminder-v*-macos-x86_64.zip` |
+| Windows x86_64 | `cockroach-reminder-v*-windows-x86_64.zip` |
+| Linux x86_64 | `cockroach-reminder-v*-linux-x86_64.tar.gz` |
+
+Release packages are currently unsigned. macOS and Windows may show a security prompt on first launch. Linux builds target X11; an X11 session or XWayland is required, along with GTK 3, AppIndicator, libxdo, Fontconfig, XKB, and the Vulkan loader.
+
+## Usage
+
+Start the app and use its tray or menu-bar icon. The settings window does not open automatically.
+
+From the tray menu you can check the remaining time, pause or resume the timer, trigger a break immediately, and open the settings window. During a break, the overlay remains click-through, so keyboard and mouse input continue to reach the windows underneath it.
+
+Settings are stored in your operating system's configuration directory under `com.cockroach.reminder/config.json`.
+
+## Build from source
+
+The repository uses the Rust nightly toolchain declared in `rust-toolchain.toml`. `cargo` installs it automatically through rustup.
+
+### macOS
+
+Install Xcode and its command-line tools. GPUI also needs the Metal toolchain. If Xcode reports that it is missing, run:
 
 ```sh
 xcodebuild -downloadComponent MetalToolchain
 ```
 
-## Run
+### Windows
+
+Install Visual Studio Build Tools with the Desktop development with C++ workload and a recent Windows SDK.
+
+### Ubuntu / Debian
+
+Install the native libraries used by GPUI and the tray integration:
 
 ```sh
-cargo run --release
+sudo apt-get update
+sudo apt-get install build-essential clang cmake libayatana-appindicator3-dev \
+  libfontconfig-dev libgtk-3-dev libssl-dev libvulkan1 libx11-xcb-dev \
+  libxdo-dev libxkbcommon-x11-dev
 ```
 
-## Verify
+Then build and run the application:
 
 ```sh
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo run --release --locked
 ```
+
+## Development
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+```
+
+Pull requests and pushes to `main` run these checks on Linux, Windows, and macOS. To publish a release, update the version in `Cargo.toml`, commit the change, and push a matching tag such as `v1.1.0`. The release workflow builds all platform packages and adds a `SHA256SUMS` file.
+
+## License
+
+MIT
