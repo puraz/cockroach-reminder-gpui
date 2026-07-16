@@ -70,9 +70,23 @@ jobs:
             libxdo-dev \
             libxkbcommon-x11-dev
 
-      - name: Install macOS Metal toolchain
+      - name: Ensure macOS Metal compiler is available
         if: runner.os == 'macOS'
-        run: xcodebuild -downloadComponent MetalToolchain
+        shell: bash
+        run: |
+          if xcrun metal -version >/dev/null 2>&1; then
+            xcrun metal -version
+            exit 0
+          fi
+
+          if xcodebuild -help 2>&1 | grep -q -- '-downloadComponent'; then
+            xcodebuild -downloadComponent MetalToolchain
+          else
+            echo "The selected Xcode does not include Metal and cannot download it." >&2
+            exit 1
+          fi
+
+          xcrun metal -version
 
       - name: Install Rust toolchain and target
         shell: bash

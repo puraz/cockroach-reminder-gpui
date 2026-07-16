@@ -47,11 +47,14 @@
 
 ### macOS
 
-需要安装 Xcode 及其命令行工具。GPUI 还需要 Metal Toolchain；如果 Xcode 提示缺少该组件，可以执行：
+需要安装 Xcode 及其命令行工具。GPUI 还需要 Metal 编译器，可用下面的命令检查：
 
 ```sh
-xcodebuild -downloadComponent MetalToolchain
+xcrun metal -version
 ```
+
+如果缺少编译器，且当前 Xcode 支持下载组件，可执行
+`xcodebuild -downloadComponent MetalToolchain`。较旧的 Xcode 版本应升级到自带 Metal 编译器的版本。
 
 ### Windows
 
