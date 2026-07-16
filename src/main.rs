@@ -29,6 +29,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::time::Instant;
 
 fn dispose_overlay_windows(handles: &mut Vec<WindowHandle<OverlayView>>, cx: &mut AsyncApp) {
     for handle in handles.drain(..) {
@@ -82,7 +83,6 @@ fn main() {
         app_cx
             .spawn(async move |cx: &mut AsyncApp| {
                 let mut frames_loaded = false;
-                let mut tick: u64 = 0;
                 // Overlay windows are reused across breaks to keep Metal allocations stable.
                 let mut overlay_handles: Vec<WindowHandle<OverlayView>> = Vec::new();
                 let mut overlays_active = false;
@@ -91,12 +91,22 @@ fn main() {
                 let mut overlay_retry_at: Option<std::time::Instant> = None;
                 let mut settings_handle: Option<WindowHandle<Root>> = None;
 
+                let mut last_timer_tick = Instant::now();
+                let mut last_frame_check = Instant::now();
+                let mut last_tray_poll = Instant::now();
+
                 loop {
-                    smol::Timer::after(Duration::from_millis(16)).await;
-                    tick += 1;
+                    let phase = cx.read_entity(&s, |st, _| st.timer.phase);
+                    let sleep_ms = if phase == Phase::Break || overlays_active {
+                        16
+                    } else {
+                        200
+                    };
+                    smol::Timer::after(Duration::from_millis(sleep_ms)).await;
 
                     // === Frame loading check (every ~200ms) ===
-                    if !frames_loaded && tick.is_multiple_of(13) {
+                    if !frames_loaded && last_frame_check.elapsed() >= Duration::from_millis(200) {
+                        last_frame_check = Instant::now();
                         if let Ok(mut guard) = dec.try_lock() {
                             if let Some(decoded) = guard.take() {
                                 drop(guard);
@@ -114,7 +124,8 @@ fn main() {
                     }
 
                     // === Timer tick (every ~1s) ===
-                    if tick.is_multiple_of(63) {
+                    if last_timer_tick.elapsed() >= Duration::from_secs(1) {
+                        last_timer_tick = Instant::now();
                         let labels = cx.update_entity(&s, |st, cx| {
                             match st.timer.tick() {
                                 Some(Transition::EnteredBreak) => {}
@@ -287,7 +298,8 @@ fn main() {
                     }
 
                     // === Tray command polling (every ~200ms) ===
-                    if tick.is_multiple_of(13) {
+                    if last_tray_poll.elapsed() >= Duration::from_millis(200) {
+                        last_tray_poll = Instant::now();
                         if let Some(cmd) = tray::poll_command() {
                             match cmd {
                                 TrayCommand::ToggleTimer => {
