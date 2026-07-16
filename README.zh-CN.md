@@ -31,7 +31,18 @@
 | Windows x86_64 | `cockroach-reminder-v*-windows-x86_64.zip` |
 | Linux x86_64 | `cockroach-reminder-v*-linux-x86_64.tar.gz` |
 
-目前发布包没有代码签名，macOS 和 Windows 首次启动时可能显示安全提示。Linux 版本使用 X11，需要 X11 会话或 XWayland，并依赖 GTK 3、AppIndicator、libxdo、Fontconfig、XKB 和 Vulkan loader。
+目前发布包没有代码签名，也没有经过 Apple 公证，因此 macOS 和 Windows 首次启动时可能显示安全提示。Linux 版本使用 X11，需要 X11 会话或 XWayland，并依赖 GTK 3、AppIndicator、libxdo、Fontconfig、XKB 和 Vulkan loader。
+
+### 在 macOS 上打开应用
+
+解压后，将 `Cockroach Reminder.app` 移到“应用程序”目录。首次启动可以先按住 Control 点击应用，然后选择“打开”。如果 macOS 仍提示应用“已损坏”，请执行：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Cockroach Reminder.app"
+open "/Applications/Cockroach Reminder.app"
+```
+
+如果 `xattr` 提示权限不足，可在该命令前加 `sudo` 后重试。请只对从本项目 GitHub Releases 下载的安装包执行此操作；打开前可以使用 Release 中的 `SHA256SUMS` 校验文件完整性。
 
 ## 使用
 

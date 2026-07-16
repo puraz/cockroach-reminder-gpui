@@ -31,7 +31,18 @@ Packages are available from the [latest GitHub release](https://github.com/puraz
 | Windows x86_64 | `cockroach-reminder-v*-windows-x86_64.zip` |
 | Linux x86_64 | `cockroach-reminder-v*-linux-x86_64.tar.gz` |
 
-Release packages are currently unsigned. macOS and Windows may show a security prompt on first launch. Linux builds target X11; an X11 session or XWayland is required, along with GTK 3, AppIndicator, libxdo, Fontconfig, XKB, and the Vulkan loader.
+Release packages are currently unsigned and not notarized. macOS and Windows may show a security prompt on first launch. Linux builds target X11; an X11 session or XWayland is required, along with GTK 3, AppIndicator, libxdo, Fontconfig, XKB, and the Vulkan loader.
+
+### Opening the app on macOS
+
+After extracting the archive, move `Cockroach Reminder.app` to `Applications`. Try Control-clicking the app and choosing **Open** first. If macOS still reports that the app is damaged, remove the quarantine attribute and launch it again:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Cockroach Reminder.app"
+open "/Applications/Cockroach Reminder.app"
+```
+
+If `xattr` reports a permission error, run that command again with `sudo`. Only bypass Gatekeeper for a package downloaded from this repository's GitHub Releases; the archive can be checked against the published `SHA256SUMS` file before opening it.
 
 ## Usage
 

@@ -52,13 +52,31 @@ mod imp {
 
     #[link(name = "objc")]
     extern "C" {
+        fn objc_getClass(name: *const c_char) -> *mut c_void;
         fn sel_registerName(name: *const c_char) -> *mut c_void;
         fn objc_msgSend();
     }
 
     pub fn hide_dock() {
-        // GPUI already manages NSApplication activation policy.
-        // We skip redundant calls to avoid objc runtime conflicts.
+        unsafe {
+            let application_class = objc_getClass(c"NSApplication".as_ptr());
+            if application_class.is_null() {
+                return;
+            }
+
+            let msg_send_id: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+                std::mem::transmute(objc_msgSend as *const ());
+            let msg_send_policy: unsafe extern "C" fn(*mut c_void, *mut c_void, isize) -> i8 =
+                std::mem::transmute(objc_msgSend as *const ());
+            let shared_application = sel_registerName(c"sharedApplication".as_ptr());
+            let set_activation_policy = sel_registerName(c"setActivationPolicy:".as_ptr());
+            let application = msg_send_id(application_class, shared_application);
+
+            if !application.is_null() {
+                // NSApplicationActivationPolicyAccessory keeps menu-bar apps out of the Dock.
+                msg_send_policy(application, set_activation_policy, 1);
+            }
+        }
     }
 
     /// Enumerate displays using CoreGraphics (no objc involved).

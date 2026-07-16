@@ -40,10 +40,9 @@ fn dispose_overlay_windows(handles: &mut Vec<WindowHandle<OverlayView>>, cx: &mu
 }
 
 fn main() {
-    platform::hide_dock();
-
     let application = gpui_platform::application().with_assets(gpui_component_assets::Assets);
     application.run(move |app_cx| {
+        platform::hide_dock();
         gpui_component::init(app_cx);
         gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, app_cx);
         let theme = gpui_component::Theme::global_mut(app_cx);

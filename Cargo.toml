@@ -1,6 +1,6 @@
 [package]
 name = "cockroach-reminder-gpui"
-version = "1.0.0"
+version = "1.0.1"
 description = "A break reminder app with cockroach animations - GPUI port"
 edition = "2021"
 license = "MIT"
