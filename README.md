@@ -50,7 +50,7 @@ The repository uses the Rust nightly toolchain declared in `rust-toolchain.toml`
 Install Xcode and its command-line tools. GPUI also needs the Metal compiler. Check it with:
 
 ```sh
-xcrun metal -version
+xcrun metal --version
 ```
 
 If it is missing and your Xcode supports downloadable components, run

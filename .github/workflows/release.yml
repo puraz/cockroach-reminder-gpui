@@ -115,8 +115,8 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          if xcrun metal -version >/dev/null 2>&1; then
-            xcrun metal -version
+          if xcrun metal --version >/dev/null 2>&1; then
+            xcrun metal --version
             exit 0
           fi
 
@@ -127,7 +127,7 @@ jobs:
             exit 1
           fi
 
-          xcrun metal -version
+          xcrun metal --version
 
       - name: Install Rust toolchain and target
         shell: bash

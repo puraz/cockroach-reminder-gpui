@@ -50,7 +50,7 @@
 需要安装 Xcode 及其命令行工具。GPUI 还需要 Metal 编译器，可用下面的命令检查：
 
 ```sh
-xcrun metal -version
+xcrun metal --version
 ```
 
 如果缺少编译器，且当前 Xcode 支持下载组件，可执行
