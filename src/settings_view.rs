@@ -228,12 +228,23 @@ impl SettingsView {
 
 impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (settings, phase, formatted) = {
+        let (phase, formatted, interval_minutes, duration_seconds, cockroach_count,
+              cockroach_size_percent, movement_percent, fast_speed_probability,
+              auto_start, launch_at_login, show_notifications) = {
             let state = self.app.read(cx);
+            let s = &state.settings;
             (
-                state.settings.clone(),
                 state.timer.phase,
                 state.timer.formatted(),
+                s.interval_minutes,
+                s.duration_seconds,
+                s.cockroach_count,
+                s.cockroach_size_percent,
+                s.movement_percent,
+                s.fast_speed_probability,
+                s.auto_start,
+                s.launch_at_login,
+                s.show_notifications,
             )
         };
 
@@ -242,17 +253,17 @@ impl Render for SettingsView {
                 .gap(px(14.))
                 .child(self.slider_row(
                     "休息间隔",
-                    format!("{} 分钟", settings.interval_minutes),
+                    format!("{} 分钟", interval_minutes),
                     &self.interval,
                 ))
                 .child(self.slider_row(
                     "显示时长",
-                    format!("{} 秒", settings.duration_seconds),
+                    format!("{} 秒", duration_seconds),
                     &self.duration,
                 ))
                 .child(self.slider_row(
                     "蟑螂数量",
-                    format!("{} 只", settings.cockroach_count),
+                    format!("{} 只", cockroach_count),
                     &self.count,
                 )),
         );
@@ -262,19 +273,19 @@ impl Render for SettingsView {
                 .gap(px(14.))
                 .child(self.slider_row(
                     "蟑螂大小",
-                    format!("{}%", settings.cockroach_size_percent.round() as u32),
+                    format!("{}%", cockroach_size_percent.round() as u32),
                     &self.size,
                 ))
                 .child(self.slider_row(
                     "移动速度",
-                    format!("{:.1}%", settings.movement_percent),
+                    format!("{:.1}%", movement_percent),
                     &self.speed,
                 ))
                 .child(self.slider_row(
                     "快速蟑螂概率",
                     format!(
                         "{}%",
-                        (settings.fast_speed_probability * 100.0).round() as u32
+                        (fast_speed_probability * 100.0).round() as u32
                     ),
                     &self.fast_probability,
                 )),
@@ -286,7 +297,7 @@ impl Render for SettingsView {
                 .child(
                     Checkbox::new("auto-start")
                         .label("启动应用时自动开启计时")
-                        .checked(settings.auto_start)
+                        .checked(auto_start)
                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                             let checked = *checked;
                             this.update_settings(cx, move |state| {
@@ -297,7 +308,7 @@ impl Render for SettingsView {
                 .child(
                     Checkbox::new("launch-at-login")
                         .label("开机自启动")
-                        .checked(settings.launch_at_login)
+                        .checked(launch_at_login)
                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                             let checked = *checked;
                             this.update_settings(cx, move |state| {
@@ -308,7 +319,7 @@ impl Render for SettingsView {
                 .child(
                     Checkbox::new("show-notifications")
                         .label("显示系统通知")
-                        .checked(settings.show_notifications)
+                        .checked(show_notifications)
                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                             let checked = *checked;
                             this.update_settings(cx, move |state| {
