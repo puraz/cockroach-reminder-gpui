@@ -47,10 +47,11 @@ pub struct AppState {
     pub overlays: Vec<OverlayState>,
     pub settings_view_opened: bool,
     pub rng: rand::rngs::ThreadRng,
+    runtime_waker: smol::channel::Sender<()>,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(runtime_waker: smol::channel::Sender<()>) -> Self {
         let settings = Settings::load();
         let mut timer = Timer::new(settings.interval_minutes, settings.duration_seconds);
         if settings.auto_start {
@@ -63,7 +64,12 @@ impl AppState {
             overlays: Vec::new(),
             settings_view_opened: false,
             rng: rand::thread_rng(),
+            runtime_waker,
         }
+    }
+
+    pub fn wake_runtime(&self) {
+        let _ = self.runtime_waker.try_send(());
     }
 
     pub fn anim_config(&self) -> AnimConfig {

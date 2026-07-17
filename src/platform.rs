@@ -22,6 +22,12 @@ mod imp {
     use raw_window_handle::RawWindowHandle;
     use std::ffi::{c_char, c_void};
 
+    const CG_SCREEN_SAVER_WINDOW_LEVEL_KEY: i32 = 13;
+    const COLLECTION_CAN_JOIN_ALL_SPACES: usize = 1 << 0;
+    const COLLECTION_IGNORES_CYCLE: usize = 1 << 6;
+    const COLLECTION_FULL_SCREEN_AUXILIARY: usize = 1 << 8;
+    const STYLE_MASK_NONACTIVATING_PANEL: usize = 1 << 7;
+
     #[repr(C)]
     #[derive(Clone, Copy)]
     struct CGPoint {
@@ -48,6 +54,7 @@ mod imp {
         fn CGMainDisplayID() -> u32;
         fn CGDisplayBounds(display: u32) -> CGRect;
         fn CGGetActiveDisplayList(maxDisplays: u32, displays: *mut u32, count: *mut u32) -> i32;
+        fn CGWindowLevelForKey(key: i32) -> i32;
     }
 
     #[link(name = "objc")]
@@ -115,22 +122,106 @@ mod imp {
     }
 
     /// Configure a GPUI popup as a click-through desktop overlay.
-    pub fn configure_overlay(handle: &RawWindowHandle) {
-        let RawWindowHandle::AppKit(handle) = handle else {
-            return;
-        };
+    pub fn configure_overlay(handle: &RawWindowHandle, frame: ScreenFrame) {
         unsafe {
-            let msg_send_id: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
-                std::mem::transmute(objc_msgSend as *const ());
+            let Some(window) = native_window(handle) else {
+                return;
+            };
             let msg_send_bool: unsafe extern "C" fn(*mut c_void, *mut c_void, i8) =
                 std::mem::transmute(objc_msgSend as *const ());
-            let view = handle.ns_view.as_ptr();
-            let window_selector = sel_registerName(c"window".as_ptr());
+            let msg_send_level: unsafe extern "C" fn(*mut c_void, *mut c_void, isize) =
+                std::mem::transmute(objc_msgSend as *const ());
+            let msg_send_behavior: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) =
+                std::mem::transmute(objc_msgSend as *const ());
+            let msg_send_usize: unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize =
+                std::mem::transmute(objc_msgSend as *const ());
+            let msg_send_void: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+                std::mem::transmute(objc_msgSend as *const ());
+            let msg_send_frame: unsafe extern "C" fn(*mut c_void, *mut c_void, CGRect, i8) =
+                std::mem::transmute(objc_msgSend as *const ());
             let ignores_mouse_selector = sel_registerName(c"setIgnoresMouseEvents:".as_ptr());
-            let window = msg_send_id(view, window_selector);
-            if !window.is_null() {
-                msg_send_bool(window, ignores_mouse_selector, 1);
+            let set_style_mask_selector = sel_registerName(c"setStyleMask:".as_ptr());
+            let set_frame_selector = sel_registerName(c"setFrame:display:".as_ptr());
+            let set_level_selector = sel_registerName(c"setLevel:".as_ptr());
+            let behavior_selector = sel_registerName(c"collectionBehavior".as_ptr());
+            let set_behavior_selector = sel_registerName(c"setCollectionBehavior:".as_ptr());
+            let hides_on_deactivate_selector = sel_registerName(c"setHidesOnDeactivate:".as_ptr());
+            let order_front_selector = sel_registerName(c"orderFrontRegardless".as_ptr());
+
+            // Titled panels are constrained below the menu bar even at a higher window level.
+            msg_send_behavior(
+                window,
+                set_style_mask_selector,
+                STYLE_MASK_NONACTIVATING_PANEL,
+            );
+            msg_send_frame(window, set_frame_selector, appkit_frame(frame), 1);
+            msg_send_bool(window, ignores_mouse_selector, 1);
+            msg_send_level(
+                window,
+                set_level_selector,
+                CGWindowLevelForKey(CG_SCREEN_SAVER_WINDOW_LEVEL_KEY) as isize,
+            );
+
+            // Join every Space (including full-screen Spaces) without entering window cycling.
+            let behavior = msg_send_usize(window, behavior_selector);
+            msg_send_behavior(
+                window,
+                set_behavior_selector,
+                behavior
+                    | COLLECTION_CAN_JOIN_ALL_SPACES
+                    | COLLECTION_IGNORES_CYCLE
+                    | COLLECTION_FULL_SCREEN_AUXILIARY,
+            );
+            msg_send_bool(window, hides_on_deactivate_selector, 0);
+            msg_send_void(window, order_front_selector);
+        }
+    }
+
+    pub fn set_overlay_visible(handle: &RawWindowHandle, visible: bool) {
+        unsafe {
+            let Some(window) = native_window(handle) else {
+                return;
+            };
+            if visible {
+                let msg_send_void: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+                    std::mem::transmute(objc_msgSend as *const ());
+                msg_send_void(window, sel_registerName(c"orderFrontRegardless".as_ptr()));
+            } else {
+                let msg_send_sender: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
+                    std::mem::transmute(objc_msgSend as *const ());
+                msg_send_sender(
+                    window,
+                    sel_registerName(c"orderOut:".as_ptr()),
+                    std::ptr::null_mut(),
+                );
             }
+        }
+    }
+
+    unsafe fn native_window(handle: &RawWindowHandle) -> Option<*mut c_void> {
+        let RawWindowHandle::AppKit(handle) = handle else {
+            return None;
+        };
+        let msg_send_id: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const ());
+        let window = msg_send_id(
+            handle.ns_view.as_ptr(),
+            sel_registerName(c"window".as_ptr()),
+        );
+        (!window.is_null()).then_some(window)
+    }
+
+    fn appkit_frame(frame: ScreenFrame) -> CGRect {
+        let main_display_height = unsafe { CGDisplayBounds(CGMainDisplayID()).size.height };
+        CGRect {
+            origin: CGPoint {
+                x: frame.x,
+                y: main_display_height - frame.y - frame.height,
+            },
+            size: CGSize {
+                width: frame.width,
+                height: frame.height,
+            },
         }
     }
 }
@@ -181,7 +272,7 @@ mod imp {
         frames
     }
 
-    pub fn configure_overlay(handle: &RawWindowHandle) {
+    pub fn configure_overlay(handle: &RawWindowHandle, _frame: ScreenFrame) {
         if let RawWindowHandle::Win32(h) = handle {
             unsafe {
                 let hwnd = h.hwnd.get() as HWND;
@@ -206,6 +297,8 @@ mod imp {
             }
         }
     }
+
+    pub fn set_overlay_visible(_handle: &RawWindowHandle, _visible: bool) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +351,7 @@ mod imp {
         frames
     }
 
-    pub fn configure_overlay(handle: &RawWindowHandle) {
+    pub fn configure_overlay(handle: &RawWindowHandle, _frame: ScreenFrame) {
         let window = match handle {
             RawWindowHandle::Xlib(h) => h.window as u32,
             _ => return,
@@ -306,10 +399,12 @@ mod imp {
         );
         let _ = conn.flush();
     }
+
+    pub fn set_overlay_visible(_handle: &RawWindowHandle, _visible: bool) {}
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-pub use imp::{configure_overlay, hide_dock, screen_frames};
+pub use imp::{configure_overlay, hide_dock, screen_frames, set_overlay_visible};

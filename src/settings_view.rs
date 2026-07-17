@@ -47,10 +47,14 @@ impl SettingsView {
                 if let SliderEvent::Change(value) = event {
                     let minutes = value.start().round() as u32;
                     this.app.update(cx, |state, cx| {
+                        let timer_restarted = state.timer.phase == Phase::Running;
                         state.settings.interval_minutes = minutes;
                         state.settings.clamp();
                         state.timer.update_interval(state.settings.interval_minutes);
                         state.settings.save();
+                        if timer_restarted {
+                            state.wake_runtime();
+                        }
                         cx.notify();
                     });
                     cx.notify();
@@ -337,6 +341,7 @@ impl Render for SettingsView {
                 cx.listener(|this, _, _, cx| {
                     this.app.update(cx, |state, cx| {
                         state.timer.trigger_break();
+                        state.wake_runtime();
                         cx.notify();
                     });
                 }),
@@ -351,11 +356,23 @@ impl Render for SettingsView {
                     MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
                         this.app.update(cx, |state, cx| {
-                            match state.timer.phase {
-                                Phase::Running => state.timer.pause(),
-                                Phase::Paused => state.timer.resume(),
-                                Phase::Idle => state.timer.start(),
-                                Phase::Break => {}
+                            let changed = match state.timer.phase {
+                                Phase::Running => {
+                                    state.timer.pause();
+                                    true
+                                }
+                                Phase::Paused => {
+                                    state.timer.resume();
+                                    true
+                                }
+                                Phase::Idle => {
+                                    state.timer.start();
+                                    true
+                                }
+                                Phase::Break => false,
+                            };
+                            if changed {
+                                state.wake_runtime();
                             }
                             cx.notify();
                         });

@@ -82,13 +82,36 @@ fn load_icon() -> Option<Icon> {
     Icon::from_rgba(img.into_raw(), w, h).ok()
 }
 
-pub fn poll_command() -> Option<TrayCommand> {
-    let event = MenuEvent::receiver().try_recv().ok()?;
-    match event.id.0.as_str() {
+pub fn command_channel() -> smol::channel::Receiver<TrayCommand> {
+    let (sender, receiver) = smol::channel::unbounded();
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        if let Some(command) = command_for_id(event.id.0.as_str()) {
+            let _ = sender.try_send(command);
+        }
+    }));
+    receiver
+}
+
+fn command_for_id(id: &str) -> Option<TrayCommand> {
+    match id {
         ID_TOGGLE => Some(TrayCommand::ToggleTimer),
         ID_BREAK => Some(TrayCommand::TriggerBreak),
         ID_SETTINGS => Some(TrayCommand::OpenSettings),
         ID_QUIT => Some(TrayCommand::Quit),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_ids_map_to_commands() {
+        assert_eq!(command_for_id(ID_TOGGLE), Some(TrayCommand::ToggleTimer));
+        assert_eq!(command_for_id(ID_BREAK), Some(TrayCommand::TriggerBreak));
+        assert_eq!(command_for_id(ID_SETTINGS), Some(TrayCommand::OpenSettings));
+        assert_eq!(command_for_id(ID_QUIT), Some(TrayCommand::Quit));
+        assert_eq!(command_for_id("unknown"), None);
     }
 }

@@ -40,6 +40,12 @@ fn dispose_overlay_windows(handles: &mut Vec<WindowHandle<OverlayView>>, cx: &mu
     }
 }
 
+fn trace_perf_event(event: &str) {
+    if std::env::var_os("COCKROACH_REMINDER_PERF_TRACE").is_some() {
+        eprintln!("perf-event:{event}");
+    }
+}
+
 fn main() {
     let application = gpui_platform::application().with_assets(gpui_component_assets::Assets);
     application.run(move |app_cx| {
@@ -66,7 +72,8 @@ fn main() {
             .detach();
 
         // Create shared state (Entity<AppState>).
-        let state = app_cx.new(|_cx| AppState::new());
+        let (runtime_waker, runtime_wakeups) = smol::channel::bounded(1);
+        let state = app_cx.new(|_cx| AppState::new(runtime_waker));
 
         // Create tray icon.
         let tray: Rc<RefCell<Option<Tray>>> = {
@@ -75,6 +82,7 @@ fn main() {
                 &labels.0, &labels.1, labels.2, &labels.3,
             )))
         };
+        let tray_commands = tray::command_channel();
 
         // Main async loop: frame loading + timer + overlay + tray commands.
         let s = state.clone();
@@ -93,16 +101,69 @@ fn main() {
 
                 let mut last_timer_tick = Instant::now();
                 let mut last_frame_check = Instant::now();
-                let mut last_tray_poll = Instant::now();
+                let mut observed_phase = cx.read_entity(&s, |st, _| st.timer.phase);
 
                 loop {
                     let phase = cx.read_entity(&s, |st, _| st.timer.phase);
-                    let sleep_ms = if phase == Phase::Break || overlays_active {
+                    if phase != observed_phase {
+                        last_timer_tick = Instant::now();
+                        observed_phase = phase;
+                    }
+
+                    // Adaptive sleep: long when idle, tight during break animation.
+                    let sleep_ms = if !frames_loaded {
+                        // Keep polling for frame decoding completion.
+                        200u64
+                    } else if phase == Phase::Break || overlays_active {
+                        // ~60 fps animation.
                         16
+                    } else if phase == Phase::Idle {
+                        // Timer stopped — nothing urgent.  Relaxed polling saves CPU.
+                        1000
+                    } else if phase == Phase::Paused {
+                        // Timer paused — moderate polling.
+                        500
                     } else {
-                        200
+                        // Phase::Running — align to the next 1-second timer tick boundary.
+                        let since_tick =
+                            last_timer_tick.elapsed().as_millis() as u64;
+                        1000_u64.saturating_sub(since_tick)
                     };
-                    smol::Timer::after(Duration::from_millis(sleep_ms)).await;
+
+                    let state_or_timer = smol::future::race(
+                        async {
+                            let _ = runtime_wakeups.recv().await;
+                            (None, true)
+                        },
+                        async {
+                            smol::Timer::after(Duration::from_millis(sleep_ms)).await;
+                            (None, false)
+                        },
+                    );
+                    let (pending_command, mut state_woke) = smol::future::race(
+                        state_or_timer,
+                        async {
+                            match tray_commands.recv().await {
+                                Ok(command) => (Some(command), false),
+                                Err(_) => std::future::pending().await,
+                            }
+                        },
+                    )
+                    .await;
+                    if runtime_wakeups.try_recv().is_ok() {
+                        state_woke = true;
+                    }
+
+                    let phase = cx.read_entity(&s, |st, _| st.timer.phase);
+                    if state_woke || phase != observed_phase {
+                        last_timer_tick = Instant::now();
+                    }
+                    if state_woke {
+                        let labels = cx.read_entity(&s, |st, _| st.refresh_tray_labels());
+                        if let Some(ref tr) = *t.borrow() {
+                            tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
+                        }
+                    }
 
                     // === Frame loading check (every ~200ms) ===
                     if !frames_loaded && last_frame_check.elapsed() >= Duration::from_millis(200) {
@@ -126,19 +187,25 @@ fn main() {
                     // === Timer tick (every ~1s) ===
                     if last_timer_tick.elapsed() >= Duration::from_secs(1) {
                         last_timer_tick = Instant::now();
-                        let labels = cx.update_entity(&s, |st, cx| {
-                            match st.timer.tick() {
-                                Some(Transition::EnteredBreak) => {}
-                                Some(Transition::EnteredRunning) => st.clear_overlays(),
-                                None => {}
-                            }
-                            cx.notify();
-                            st.refresh_tray_labels()
+                        let timer_active = cx.read_entity(&s, |st, _| {
+                            matches!(st.timer.phase, Phase::Running | Phase::Break)
                         });
-                        if let Some(ref tr) = *t.borrow() {
-                            tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
+                        if timer_active {
+                            let labels = cx.update_entity(&s, |st, cx| {
+                                match st.timer.tick() {
+                                    Some(Transition::EnteredBreak) => {}
+                                    Some(Transition::EnteredRunning) => st.clear_overlays(),
+                                    None => {}
+                                }
+                                cx.notify();
+                                st.refresh_tray_labels()
+                            });
+                            if let Some(ref tr) = *t.borrow() {
+                                tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
+                            }
                         }
                     }
+                    observed_phase = cx.read_entity(&s, |st, _| st.timer.phase);
 
                     // === Overlay lifecycle ===
                     let frames_ok = cx.read_entity(&s, |st, _| st.frames.is_some());
@@ -208,7 +275,15 @@ fn main() {
                                             |window, cx| {
                                                 window.set_input_region(Some(&[]));
                                                 if let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) {
-                                                    platform::configure_overlay(&handle.as_raw());
+                                                    platform::configure_overlay(
+                                                        &handle.as_raw(),
+                                                        platform::ScreenFrame {
+                                                            x: *x,
+                                                            y: *y,
+                                                            width: *w as f64,
+                                                            height: *h as f64,
+                                                        },
+                                                    );
                                                 }
                                                 cx.new(|_| OverlayView::new(r, fs, *w, *h))
                                             },
@@ -225,8 +300,11 @@ fn main() {
                                     overlay_handles.iter().zip(&infos)
                                 {
                                     if handle
-                                        .update(cx, |view, _, cx| {
+                                        .update(cx, |view, window, cx| {
                                             view.roaches.clone_from(roaches);
+                                            if let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) {
+                                                platform::set_overlay_visible(&handle.as_raw(), true);
+                                            }
                                             cx.notify();
                                         })
                                         .is_err()
@@ -243,6 +321,7 @@ fn main() {
                                     overlays_active = true;
                                     overlay_signature = signature;
                                     overlay_retry_at = None;
+                                    trace_perf_event("overlay-shown");
                                 }
                             } else {
                                 dispose_overlay_windows(&mut overlay_handles, cx);
@@ -254,8 +333,11 @@ fn main() {
                     } else if phase != Phase::Break && break_initialized {
                         if overlays_active {
                             for handle in &overlay_handles {
-                                let _ = handle.update(cx, |view, _, cx| {
+                                let _ = handle.update(cx, |view, window, cx| {
                                     view.roaches.clear();
+                                    if let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) {
+                                        platform::set_overlay_visible(&handle.as_raw(), false);
+                                    }
                                     cx.notify();
                                 });
                             }
@@ -267,6 +349,7 @@ fn main() {
                         overlays_active = false;
                         break_initialized = false;
                         overlay_retry_at = None;
+                        trace_perf_event("overlay-hidden");
                     } else if phase == Phase::Break && overlays_active {
                         // Update animation and push data to overlay windows.
                         let now = std::time::Instant::now();
@@ -297,107 +380,110 @@ fn main() {
                         }
                     }
 
-                    // === Tray command polling (every ~200ms) ===
-                    if last_tray_poll.elapsed() >= Duration::from_millis(200) {
-                        last_tray_poll = Instant::now();
-                        if let Some(cmd) = tray::poll_command() {
-                            match cmd {
-                                TrayCommand::ToggleTimer => {
-                                    let labels = cx.update_entity(&s, |st, cx| {
-                                        match st.timer.phase {
-                                            Phase::Running => st.timer.pause(),
-                                            Phase::Paused => st.timer.resume(),
-                                            Phase::Idle => st.timer.start(),
-                                            Phase::Break => {}
-                                        }
-                                        cx.notify();
-                                        st.refresh_tray_labels()
-                                    });
-                                    if let Some(ref tr) = *t.borrow() {
-                                        tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
-                                    };
-                                }
-                                TrayCommand::TriggerBreak => {
-                                    let labels = cx.update_entity(&s, |st, cx| {
-                                        st.timer.trigger_break();
-                                        cx.notify();
-                                        st.refresh_tray_labels()
-                                    });
-                                    if let Some(ref tr) = *t.borrow() {
-                                        tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
-                                    };
-                                }
-                                TrayCommand::OpenSettings => {
-                                    cx.update(|app| app.activate(true));
-                                    let activated = settings_handle
-                                        .and_then(|handle| {
-                                            handle
-                                                .update(cx, |_, window, _| window.activate_window())
-                                                .ok()
-                                                .map(|_| true)
-                                        })
-                                        .unwrap_or(false);
-
-                                    if !activated {
-                                        let s2 = s.clone();
-                                        let opened = cx.update(|app| {
-                                            let bounds = WindowBounds::centered(
-                                                size(px(480.), px(690.)),
-                                                app,
-                                            );
-                                            app.open_window(
-                                                WindowOptions {
-                                                    window_bounds: Some(bounds),
-                                                    window_background:
-                                                        WindowBackgroundAppearance::Opaque,
-                                                    focus: true,
-                                                    show: true,
-                                                    kind: WindowKind::Normal,
-                                                    is_movable: true,
-                                                    is_resizable: true,
-                                                    is_minimizable: true,
-                                                    display_id: None,
-                                                    titlebar: Some(TitlebarOptions {
-                                                        title: Some("蟑螂提醒设置".into()),
-                                                        ..Default::default()
-                                                    }),
-                                                    app_owns_titlebar_drag: false,
-                                                    app_id: None,
-                                                    window_min_size: Some(size(px(400.), px(560.))),
-                                                    icon: None,
-                                                    tabbing_identifier: None,
-                                                    window_decorations: None,
-                                                },
-                                                move |window, cx| {
-                                                    let view = cx.new(|cx| {
-                                                        SettingsView::new(s2.clone(), cx)
-                                                    });
-                                                    cx.new(|cx| Root::new(view, window, cx))
-                                                },
-                                            )
-                                        });
-                                        if let Ok(handle) = opened {
-                                            let _ = handle.update(cx, |_, window, _| {
-                                                window.activate_window();
-                                            });
-                                            settings_handle = Some(handle);
-                                        }
+                    // === Tray commands (event-driven; the channel wakes this task immediately) ===
+                    if let Some(cmd) = pending_command {
+                        match cmd {
+                            TrayCommand::ToggleTimer => {
+                                let (labels, reset_epoch) = cx.update_entity(&s, |st, cx| {
+                                    let reset_epoch =
+                                        matches!(st.timer.phase, Phase::Paused | Phase::Idle);
+                                    match st.timer.phase {
+                                        Phase::Running => st.timer.pause(),
+                                        Phase::Paused => st.timer.resume(),
+                                        Phase::Idle => st.timer.start(),
+                                        Phase::Break => {}
                                     }
+                                    cx.notify();
+                                    (st.refresh_tray_labels(), reset_epoch)
+                                });
+                                if reset_epoch {
+                                    last_timer_tick = Instant::now();
+                                }
+                                if let Some(ref tr) = *t.borrow() {
+                                    tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
+                                };
+                            }
+                            TrayCommand::TriggerBreak => {
+                                let labels = cx.update_entity(&s, |st, cx| {
+                                    st.timer.trigger_break();
+                                    cx.notify();
+                                    st.refresh_tray_labels()
+                                });
+                                last_timer_tick = Instant::now();
+                                if let Some(ref tr) = *t.borrow() {
+                                    tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
+                                };
+                            }
+                            TrayCommand::OpenSettings => {
+                                cx.update(|app| app.activate(true));
+                                let activated = settings_handle
+                                    .and_then(|handle| {
+                                        handle
+                                            .update(cx, |_, window, _| window.activate_window())
+                                            .ok()
+                                            .map(|_| true)
+                                    })
+                                    .unwrap_or(false);
 
-                                    let labels = cx.update_entity(&s, |st, cx| {
-                                        st.settings_view_opened = true;
-                                        cx.notify();
-                                        st.refresh_tray_labels()
+                                if !activated {
+                                    let s2 = s.clone();
+                                    let opened = cx.update(|app| {
+                                        let bounds = WindowBounds::centered(
+                                            size(px(480.), px(690.)),
+                                            app,
+                                        );
+                                        app.open_window(
+                                            WindowOptions {
+                                                window_bounds: Some(bounds),
+                                                window_background:
+                                                    WindowBackgroundAppearance::Opaque,
+                                                focus: true,
+                                                show: true,
+                                                kind: WindowKind::Normal,
+                                                is_movable: true,
+                                                is_resizable: true,
+                                                is_minimizable: true,
+                                                display_id: None,
+                                                titlebar: Some(TitlebarOptions {
+                                                    title: Some("蟑螂提醒设置".into()),
+                                                    ..Default::default()
+                                                }),
+                                                app_owns_titlebar_drag: false,
+                                                app_id: None,
+                                                window_min_size: Some(size(px(400.), px(560.))),
+                                                icon: None,
+                                                tabbing_identifier: None,
+                                                window_decorations: None,
+                                            },
+                                            move |window, cx| {
+                                                let view = cx.new(|cx| {
+                                                    SettingsView::new(s2.clone(), cx)
+                                                });
+                                                cx.new(|cx| Root::new(view, window, cx))
+                                            },
+                                        )
                                     });
-                                    let guard = t.borrow();
-                                    if let Some(ref tr) = *guard {
-                                        tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
-                                    };
+                                    if let Ok(handle) = opened {
+                                        let _ = handle.update(cx, |_, window, _| {
+                                            window.activate_window();
+                                        });
+                                        settings_handle = Some(handle);
+                                    }
                                 }
-                                TrayCommand::Quit => {
-                                    cx.update(|app_cx: &mut App| app_cx.quit());
-                                    break;
-                                }
+
+                                let labels = cx.update_entity(&s, |st, cx| {
+                                    st.settings_view_opened = true;
+                                    cx.notify();
+                                    st.refresh_tray_labels()
+                                });
+                                let guard = t.borrow();
+                                if let Some(ref tr) = *guard {
+                                    tr.refresh(&labels.0, &labels.1, labels.2, &labels.3);
+                                };
+                            }
+                            TrayCommand::Quit => {
+                                cx.update(|app_cx: &mut App| app_cx.quit());
+                                break;
                             }
                         }
                     }
