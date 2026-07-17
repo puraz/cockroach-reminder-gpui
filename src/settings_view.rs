@@ -232,9 +232,19 @@ impl SettingsView {
 
 impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (phase, formatted, interval_minutes, duration_seconds, cockroach_count,
-              cockroach_size_percent, movement_percent, fast_speed_probability,
-              auto_start, launch_at_login, show_notifications) = {
+        let (
+            phase,
+            formatted,
+            interval_minutes,
+            duration_seconds,
+            cockroach_count,
+            cockroach_size_percent,
+            movement_percent,
+            fast_speed_probability,
+            auto_start,
+            launch_at_login,
+            show_notifications,
+        ) = {
             let state = self.app.read(cx);
             let s = &state.settings;
             (
@@ -265,11 +275,7 @@ impl Render for SettingsView {
                     format!("{} 秒", duration_seconds),
                     &self.duration,
                 ))
-                .child(self.slider_row(
-                    "蟑螂数量",
-                    format!("{} 只", cockroach_count),
-                    &self.count,
-                )),
+                .child(self.slider_row("蟑螂数量", format!("{} 只", cockroach_count), &self.count)),
         );
 
         let animation_section = self.section(
@@ -287,10 +293,7 @@ impl Render for SettingsView {
                 ))
                 .child(self.slider_row(
                     "快速蟑螂概率",
-                    format!(
-                        "{}%",
-                        (fast_speed_probability * 100.0).round() as u32
-                    ),
+                    format!("{}%", (fast_speed_probability * 100.0).round() as u32),
                     &self.fast_probability,
                 )),
         );
