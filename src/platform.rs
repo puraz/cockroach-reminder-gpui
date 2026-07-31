@@ -237,9 +237,9 @@ mod imp {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE};
     use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-        WS_EX_TRANSPARENT,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, SW_HIDE,
+        SW_SHOWNOACTIVATE, GWL_EXSTYLE, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
     };
 
     pub fn hide_dock() {}
@@ -277,13 +277,16 @@ mod imp {
             unsafe {
                 let hwnd = h.hwnd.get() as HWND;
                 let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                // WS_EX_LAYERED | WS_EX_TRANSPARENT together make the window
+                // click-through (the recipe used by Electron's setIgnoreMouseEvents).
                 SetWindowLongPtrW(
                     hwnd,
                     GWL_EXSTYLE,
                     style
                         | WS_EX_TRANSPARENT as isize
                         | WS_EX_NOACTIVATE as isize
-                        | WS_EX_TOOLWINDOW as isize,
+                        | WS_EX_TOOLWINDOW as isize
+                        | WS_EX_LAYERED as isize,
                 );
                 SetWindowPos(
                     hwnd,
@@ -298,7 +301,21 @@ mod imp {
         }
     }
 
-    pub fn set_overlay_visible(_handle: &RawWindowHandle, _visible: bool) {}
+    pub fn set_overlay_visible(handle: &RawWindowHandle, visible: bool) {
+        if let RawWindowHandle::Win32(h) = handle {
+            let hwnd = h.hwnd.get() as HWND;
+            unsafe {
+                ShowWindow(
+                    hwnd,
+                    if visible {
+                        SW_SHOWNOACTIVATE
+                    } else {
+                        SW_HIDE
+                    },
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
