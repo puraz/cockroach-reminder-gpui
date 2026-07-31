@@ -327,8 +327,9 @@ mod imp {
     use super::*;
     use raw_window_handle::RawWindowHandle;
     use x11rb::connection::Connection;
+    use x11rb::protocol::shape::{self, ConnectionExt as _};
     use x11rb::protocol::xinerama::ConnectionExt as _;
-    use x11rb::protocol::xproto::ConnectionExt as _;
+    use x11rb::protocol::xproto::{self, ConnectionExt as _};
 
     pub fn hide_dock() {}
     pub fn screen_frames() -> Vec<ScreenFrame> {
@@ -369,55 +370,76 @@ mod imp {
     }
 
     pub fn configure_overlay(handle: &RawWindowHandle, _frame: ScreenFrame) {
+        // GPUI's X11 backend exposes XcbWindowHandle, not XlibWindowHandle.
         let window = match handle {
-            RawWindowHandle::Xlib(h) => h.window as u32,
+            RawWindowHandle::Xcb(h) => h.window.get(),
             _ => return,
         };
         let (conn, _) = match x11rb::connect(None) {
             Ok(v) => v,
             Err(_) => return,
         };
-        let setup = conn.setup();
-        if setup.roots.is_empty() {
-            return;
-        }
-        let root = setup.roots[0].root;
-        let state_atom = || -> Option<u32> {
-            conn.intern_atom(false, b"_NET_WM_STATE")
-                .ok()?
-                .reply()
-                .ok()
-                .map(|r| r.atom)
-        }()
-        .unwrap_or(0);
-        let above_atom = || -> Option<u32> {
-            conn.intern_atom(false, b"_NET_WM_STATE_ABOVE")
-                .ok()?
-                .reply()
-                .ok()
-                .map(|r| r.atom)
-        }()
-        .unwrap_or(0);
-        if state_atom == 0 || above_atom == 0 {
-            return;
-        }
-        let event = x11rb::protocol::xproto::ClientMessageEvent::new(
-            32,
+
+        // An empty input shape makes the whole window click-through.
+        let _ = conn.shape_rectangles(
+            shape::SO::SET,
+            shape::SK::INPUT,
+            xproto::ClipOrdering::UNSORTED,
             window,
-            state_atom,
-            [2u32, above_atom, 0, 0, 0],
+            0,
+            0,
+            &[],
         );
-        let _ = conn.send_event(
-            false,
-            root,
-            x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_REDIRECT
-                | x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_NOTIFY,
-            event,
-        );
+
+        // Ask the WM to keep the overlay above normal windows (EWMH).
+        if let Some(root) = conn.setup().roots.get(0) {
+            let state_atom = conn
+                .intern_atom(false, b"_NET_WM_STATE")
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .map(|reply| reply.atom)
+                .unwrap_or(0);
+            let above_atom = conn
+                .intern_atom(false, b"_NET_WM_STATE_ABOVE")
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .map(|reply| reply.atom)
+                .unwrap_or(0);
+            if state_atom != 0 && above_atom != 0 {
+                let event = xproto::ClientMessageEvent::new(
+                    32,
+                    window,
+                    state_atom,
+                    [2u32, above_atom, 0, 0, 0],
+                );
+                let _ = conn.send_event(
+                    false,
+                    root.root,
+                    xproto::EventMask::SUBSTRUCTURE_REDIRECT
+                        | xproto::EventMask::SUBSTRUCTURE_NOTIFY,
+                    event,
+                );
+            }
+        }
         let _ = conn.flush();
     }
 
-    pub fn set_overlay_visible(_handle: &RawWindowHandle, _visible: bool) {}
+    pub fn set_overlay_visible(handle: &RawWindowHandle, visible: bool) {
+        let window = match handle {
+            RawWindowHandle::Xcb(h) => h.window.get(),
+            _ => return,
+        };
+        let (conn, _) = match x11rb::connect(None) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let result = if visible {
+            conn.map_window(window)
+        } else {
+            conn.unmap_window(window)
+        };
+        let _ = result.and_then(|_| conn.flush());
+    }
 }
 
 // ---------------------------------------------------------------------------
