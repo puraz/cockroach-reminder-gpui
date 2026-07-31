@@ -237,9 +237,9 @@ mod imp {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE};
     use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, SW_HIDE,
-        SW_SHOWNOACTIVATE, GWL_EXSTYLE, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_TOPMOST,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WS_EX_LAYERED,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
     };
 
     pub fn hide_dock() {}
@@ -305,14 +305,7 @@ mod imp {
         if let RawWindowHandle::Win32(h) = handle {
             let hwnd = h.hwnd.get() as HWND;
             unsafe {
-                ShowWindow(
-                    hwnd,
-                    if visible {
-                        SW_SHOWNOACTIVATE
-                    } else {
-                        SW_HIDE
-                    },
-                );
+                ShowWindow(hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
             }
         }
     }
